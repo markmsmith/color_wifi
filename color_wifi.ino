@@ -13,6 +13,7 @@
 
 #define SERVER_PORT 80
 
+boolean wifiConnected = false;
 ESP8266WebServer server(SERVER_PORT);
 
 int redPin = D5;
@@ -59,7 +60,7 @@ void handleRoot()
                  "  xhr.send();\n"
                  "  console.log('sending command');\n"
                  "}\n"
-                 "function hexToRgGB(hexColor){\n"
+                 "function hexToRGB(hexColor){\n"
                  " // abuse int coercion of hex escape string by bitwise operator\n"
                  "  return ['0x' + hexColor[1] + hexColor[2] | 0, '0x' + hexColor[3] + hexColor[4] | 0, '0x' + hexColor[5] + hexColor[6] | 0].join(',');\n"
                  "}\n"
@@ -74,27 +75,51 @@ void handleRoot()
   server.send(200, "text/html", pageContent);
 }
 
+// special value to represent that no command was supplied
+const String NO_COMMAND = "NO_COMMAND" ;
+
+String getCommand(){
+  // check if it's a valid update (just use first query parameter)
+  if(server.args() > 0 && server.argName(0).equals("command")){
+    String command = server.arg(0);
+    Serial.print("Got command "); Serial.println(command);
+    return command;
+  }
+  return NO_COMMAND;
+}
+
+short readShortFromString(String str, int index) {
+  if(index + 3 > str.length()){
+    return (short) 0;
+  }
+
+  int endIndex = str.indexOf(',', index);
+  // handle if at end of string
+  if(endIndex == -1) {
+    endIndex = index + 3;
+  }
+  // handle value being less than 3 characters
+  // need to use _min because of this issue https://github.com/esp8266/Arduino/issues/263
+  endIndex = _min(endIndex, index +3);
+  String strValue = str.substring(index, endIndex);
+  Serial.print("Parsing strValue: ");
+  Serial.println(strValue);
+  return (short) strValue.toInt();
+}
+
 void handleLedPath()
 {
   String command = getCommand();
   // make sure we actually got a command
   if (!NO_COMMAND.equals(command))
   {
-    // Set LED to the requested state
-    if (command.equals("ON"))
-    {
-      updateLed(LED_ON);
-      server.send(200, "text/plain", "Success");
-    }
-    else if (command.equals("OFF"))
-    {
-      updateLed(!LED_ON);
-      server.send(200, "text/plain", "Success");
-    }
-    else
-    {
-      server.send(400, "text/plain", "Invalid command");
-    }
+    //TODO check the string is correct pattern
+    // attempt to parse the RGB values ("rrr,ggg,bbb")
+    red = readShortFromString(command, 0);
+    green = readShortFromString(command, 4);
+    blue = readShortFromString(command, 8);
+    setColor(red, green, blue);
+    server.send(200, "text/plain", "Success");
   }
 }
 
@@ -105,7 +130,8 @@ void handleNotFound()
 
 void setup()
 {
-
+  Serial.begin(115200);
+  
   // Connect to WiFi network
   Serial.println();
   Serial.println();
@@ -141,7 +167,7 @@ void setup()
   pinMode(redPin, OUTPUT);
   pinMode(greenPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
-  Serial.begin(115200);
+  
   Serial.println("Setup complete");
   red = green = blue = fullBright;
   setColor(red, green, blue);
@@ -178,6 +204,10 @@ short readValue()
 
 void loop()
 {
+  // handle any http clients
+  server.handleClient();
+
+  // attempt to read any serial commands
   int color;
   if (Serial.available() > 0)
   {
@@ -214,7 +244,7 @@ void loop()
     setColor(red, green, blue);
   }
 
-  delay(1000);
+  delay(10);
 }
 
 void setColor(int red, int green, int blue)
